@@ -2,21 +2,33 @@ import streamlit as st
 import pickle
 import string
 import nltk
+import ssl
 
-# Download required NLTK data
+# Handle SSL certificate issues that sometimes occur on Streamlit Cloud
 try:
-    nltk.data.find('tokenizers/punkt')
-except LookupError:
-    nltk.download('punkt')
+    _create_unverified_https_context = ssl._create_unverified_context
+except AttributeError:
+    pass
+else:
+    ssl._create_default_https_context = _create_unverified_https_context
 
-try:
-    nltk.data.find('corpora/stopwords')
-except LookupError:
-    nltk.download('stopwords')
+
+# Force download NLTK data
+@st.cache_resource
+def setup_nltk():
+    nltk.download('punkt', quiet=True)
+    nltk.download('punkt_tab', quiet=True)
+    nltk.download('stopwords', quiet=True)
+    return True
+
+
+setup_nltk()
 
 from nltk.corpus import stopwords
 from nltk.stem.porter import PorterStemmer
+
 ps = PorterStemmer()
+
 
 def transform_text(text):
     text = text.lower()
@@ -37,22 +49,38 @@ def transform_text(text):
 
     return " ".join(y)
 
+
 # Load the saved models
-tfidf = pickle.load(open('vectorizer.pkl', 'rb'))
-model = pickle.load(open('model.pkl', 'rb'))
+@st.cache_resource
+def load_models():
+    tfidf = pickle.load(open('vectorizer.pkl', 'rb'))
+    model = pickle.load(open('model.pkl', 'rb'))
+    return tfidf, model
 
-st.title("Email/SMS Spam Classifier")
 
-input_sms = st.text_area("Enter the message")
-if st.button("Predict"):
-    # 1- pre-process
-    transformed_sms = transform_text(input_sms)
-    # 2- Vectorize
-    vector_input = tfidf.transform([transformed_sms])
-    # 3- Predict
-    result = model.predict(vector_input)[0]
-    # 4- Display
-    if result == 1:
-        st.header("Spam")
+tfidf, model = load_models()
+
+st.title("📱 Email/SMS Spam Classifier")
+st.write("Enter a message below to check if it's spam or not.")
+
+input_sms = st.text_area("Enter the message", height=100, placeholder="Type your message here...")
+
+if st.button("🔍 Predict", type="primary"):
+    if input_sms.strip():
+        with st.spinner('Analyzing message...'):
+            # 1- pre-process
+            transformed_sms = transform_text(input_sms)
+            # 2- Vectorize
+            vector_input = tfidf.transform([transformed_sms])
+            # 3- Predict
+            result = model.predict(vector_input)[0]
+
+            # 4- Display
+            if result == 1:
+                st.error("🚨 **SPAM DETECTED**")
+                st.write("This message appears to be spam.")
+            else:
+                st.success("✅ **NOT SPAM**")
+                st.write("This message appears to be legitimate.")
     else:
-        st.header("Not Spam")
+        st.warning("⚠️ Please enter a message to classify.")
